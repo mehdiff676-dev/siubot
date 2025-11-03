@@ -1,3 +1,6 @@
+#Credit  by @xza_officel 
+
+
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, ChatPermissions
 import json
@@ -23,11 +26,6 @@ bot = telebot.TeleBot(API_TOKEN)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# إعدادات القناة المطلوبة
-REQUIRED_CHANNEL = "@siubothere"  # ضع معرف قناتك هنا
-CHANNEL_URL = "https://t.me/siubothere"
-CHANNEL_ID = "3201971104"
-
 # قاعدة البيانات المتطورة
 def init_db():
     conn = sqlite3.connect('bot_data.db')
@@ -45,23 +43,23 @@ def init_db():
                   reputation INTEGER DEFAULT 100,
                   last_activity TEXT,
                   is_premium INTEGER DEFAULT 0,
-                  is_member INTEGER DEFAULT 0,
+                  is_member INTEGER DEFAULT 1,
                   membership_type TEXT DEFAULT 'free',
                   membership_expiry TEXT,
                   coins INTEGER DEFAULT 0)''')
     
-    # جدول المجموعات
+    # جدول المجموعات - تم إصلاح المشكلة هنا
     c.execute('''CREATE TABLE IF NOT EXISTS groups
                  (chat_id INTEGER PRIMARY KEY,
                   title TEXT,
                   description TEXT,
-                  welcome_message TEXT DEFAULT '﷽\\n - عضو جديد في المجموعة \\n - ({members} users)\\nاهلا بك عزيزي \\n\\nمرحبا بك في المجموعة نورتنا \\nمعلوماتك شخصية \\n\\n⌔︙المستخدم : {name}\\n⌔︙اشترك في القناة لأستخدام الدردشة',
-                  rules TEXT DEFAULT '📝 القواعد:\\n• احترام الأعضاء\\n• عدم السبام\\n• الالتزام بالأدب',
+                  welcome_message TEXT,
+                  rules TEXT,
                   photo TEXT DEFAULT NULL,
                   welcome_enabled INTEGER DEFAULT 1,
-                  channel_required INTEGER DEFAULT 1,
-                  channel_url TEXT DEFAULT ?,
-                  created_date TEXT)''', (CHANNEL_URL,))
+                  channel_required INTEGER DEFAULT 0,
+                  channel_url TEXT,
+                  created_date TEXT)''')
     
     # جدول المشرفين والمميزين
     c.execute('''CREATE TABLE IF NOT EXISTS special_users
@@ -123,7 +121,7 @@ def init_db():
     logger.info("✅ تم تهيئة قاعدة البيانات بنجاح")
 
 def update_db_schema():
-    """تحديث هيكل قاعدة البيانات لإضافة الأعمدة الجديدة"""
+    """تحديث هيكل قاعدة البيانات"""
     conn = sqlite3.connect('bot_data.db')
     c = conn.cursor()
     
@@ -135,7 +133,7 @@ def update_db_schema():
         # الأعمدة المطلوبة
         required_columns = {
             'last_activity': 'TEXT',
-            'is_member': 'INTEGER DEFAULT 0',
+            'is_member': 'INTEGER DEFAULT 1',
             'membership_type': 'TEXT DEFAULT "free"',
             'membership_expiry': 'TEXT',
             'coins': 'INTEGER DEFAULT 0'
@@ -145,27 +143,6 @@ def update_db_schema():
             if column_name not in columns:
                 c.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
                 logger.info(f"✅ تم إضافة العمود {column_name}")
-        
-        # تحديث جدول groups لإضافة نظام القنوات
-        c.execute("PRAGMA table_info(groups)")
-        group_columns = [column[1] for column in c.fetchall()]
-        
-        group_updates = {
-            'channel_required': 'INTEGER DEFAULT 1',
-            'channel_url': f'TEXT DEFAULT "{CHANNEL_URL}"'
-        }
-        
-        for column_name, column_type in group_updates.items():
-            if column_name not in group_columns:
-                c.execute(f'ALTER TABLE groups ADD COLUMN {column_name} {column_type}')
-                logger.info(f"✅ تم إضافة العمود {column_name} إلى groups")
-        
-        # إضافة القناة المطلوبة إلى جدول القنوات
-        c.execute('SELECT * FROM required_channels WHERE channel_id = ?', (CHANNEL_ID,))
-        if not c.fetchone():
-            c.execute('INSERT INTO required_channels (chat_id, channel_id, channel_url, channel_name) VALUES (?, ?, ?, ?)',
-                     (0, CHANNEL_ID, CHANNEL_URL, REQUIRED_CHANNEL))
-            logger.info("✅ تم إضافة القناة المطلوبة")
         
         conn.commit()
         
@@ -191,23 +168,23 @@ def get_group_settings(chat_id):
         return {
             'title': result[1],
             'description': result[2],
-            'welcome_message': result[3],
-            'rules': result[4],
+            'welcome_message': result[3] or '﷽\\n - عضو جديد في المجموعة \\n - ({members} users)\\nاهلا بك عزيزي \\n\\nمرحبا بك في المجموعة نورتنا \\nمعلوماتك شخصية \\n\\n⌔︙المستخدم : {name}\\n⌔︙مرحبا بك في المجموعة',
+            'rules': result[4] or '📝 القواعد:\\n• احترام الأعضاء\\n• عدم السبام\\n• الالتزام بالأدب',
             'photo': result[5],
-            'welcome_enabled': bool(result[6]),
-            'channel_required': bool(result[7] if len(result) > 7 else True),
-            'channel_url': result[8] if len(result) > 8 else CHANNEL_URL
+            'welcome_enabled': bool(result[6] if result[6] is not None else True),
+            'channel_required': bool(result[7] if result[7] is not None else False),
+            'channel_url': result[8]
         }
     else:
         default_settings = {
             'title': '',
             'description': '',
-            'welcome_message': '﷽\\n - عضو جديد في المجموعة \\n - ({members} users)\\nاهلا بك عزيزي \\n\\nمرحبا بك في المجموعة نورتنا \\nمعلوماتك شخصية \\n\\n⌔︙المستخدم : {name}\\n⌔︙اشترك في القناة لأستخدام الدردشة',
+            'welcome_message': '﷽\\n - عضو جديد في المجموعة \\n - ({members} users)\\nاهلا بك عزيزي \\n\\nمرحبا بك في المجموعة نورتنا \\nمعلوماتك شخصية \\n\\n⌔︙المستخدم : {name}\\n⌔︙مرحبا بك في المجموعة',
             'rules': '📝 القواعد:\\n• احترام الأعضاء\\n• عدم السبام\\n• الالتزام بالأدب',
             'photo': None,
             'welcome_enabled': True,
-            'channel_required': True,
-            'channel_url': CHANNEL_URL
+            'channel_required': False,
+            'channel_url': None
         }
         save_group_settings(chat_id, default_settings)
         return default_settings
@@ -227,30 +204,6 @@ def save_group_settings(chat_id, settings):
     conn.commit()
     conn.close()
 
-def add_required_channel(chat_id, channel_id, channel_url, channel_name):
-    """إضافة قناة مطلوبة"""
-    conn = sqlite3.connect('bot_data.db')
-    c = conn.cursor()
-    c.execute('INSERT OR REPLACE INTO required_channels VALUES (?, ?, ?, ?)',
-              (chat_id, channel_id, channel_url, channel_name))
-    conn.commit()
-    conn.close()
-
-def get_required_channels(chat_id):
-    """جلب القنوات المطلوبة"""
-    conn = sqlite3.connect('bot_data.db')
-    c = conn.cursor()
-    c.execute('SELECT * FROM required_channels WHERE chat_id = ?', (chat_id,))
-    results = c.fetchall()
-    
-    # إذا لم توجد قنوات للمجموعة، استخدم القناة العامة
-    if not results:
-        c.execute('SELECT * FROM required_channels WHERE chat_id = 0')
-        results = c.fetchall()
-    
-    conn.close()
-    return results
-
 # نظام إدارة المستخدمين
 def save_user_info(user):
     conn = sqlite3.connect('bot_data.db')
@@ -260,21 +213,13 @@ def save_user_info(user):
                  (user_id, username, first_name, last_name, join_date, last_activity, is_member)
                  VALUES (?, ?, ?, ?, ?, ?, ?)''',
               (user.id, user.username, user.first_name, user.last_name, 
-               datetime.datetime.now().isoformat(), datetime.datetime.now().isoformat(), 0))
+               datetime.datetime.now().isoformat(), datetime.datetime.now().isoformat(), 1))
     
     c.execute('''UPDATE users SET username=?, first_name=?, last_name=?, last_activity=?
                  WHERE user_id=?''',
               (user.username, user.first_name, user.last_name, 
                datetime.datetime.now().isoformat(), user.id))
     
-    conn.commit()
-    conn.close()
-
-def update_user_membership(user_id, is_member=True):
-    """تحديث حالة اشتراك المستخدم"""
-    conn = sqlite3.connect('bot_data.db')
-    c = conn.cursor()
-    c.execute('UPDATE users SET is_member = ? WHERE user_id = ?', (int(is_member), user_id))
     conn.commit()
     conn.close()
 
@@ -326,19 +271,6 @@ def add_special_user(chat_id, user_id, role):
               (chat_id, user_id, role, 'all', datetime.datetime.now().isoformat()))
     conn.commit()
     conn.close()
-
-def check_channel_subscription(user_id, channel_id):
-    """التحقق من اشتراك المستخدم في القناة"""
-    try:
-        chat_member = bot.get_chat_member(channel_id, user_id)
-        return chat_member.status in ['member', 'administrator', 'creator']
-    except Exception as e:
-        logger.error(f"خطأ في التحقق من الاشتراك: {e}")
-        return False
-
-def check_user_subscription(user_id):
-    """التحقق من اشتراك المستخدم في القناة المطلوبة"""
-    return check_channel_subscription(user_id, CHANNEL_ID)
 
 # نظام الحماية
 class ProtectionSystem:
@@ -505,15 +437,15 @@ def get_welcome_message(chat_id, user):
 siu_responses = [
     "ليش فاضي اك مبك؟ 😄", "مو فاضي والله! 🏃‍♂️", "نعم، تفضل 🌟", "ما بك؟ كل شيء بخير 🎯",
     "فاضي شوي، شتريد؟ 🤔", "والله مو فاضي، عندي شغل 🚀", "اييه فاضي، حكيك 🎭", "شتبي؟ فاضي بس مادري شسويلك 💭",
-    "فاضي وياك، تفضل 🌸", "لا مو فاضي، عندي مشاوير 🏃", "فاضي بس ماني مطلع برا 🏠", "اي فاضي، شقولك؟ 🎪",
+    "فاضي وياك، تفضل 🌸", "لا مو فاضي، عندي مشاوير 🏃", "فاضي بس ماني مطلع برا 🏠", "اي فاضي، شقولك？ 🎪",
     "فاضي مثل الهواء ☁️", "مو فاضي، دزلي خاص 🕵️", "فاضي لك وياك يا قلبي 💖", "لا والله مشغول 📚",
     "فاضي وانت عمري 🎁", "شتبي؟ ماني فاضي للعب 🎮", "فاضي بس للجادين فقط ⚡", "مو فاضي، عندي دورة حياة 🐛",
     "فاضي مثل بحر 🌊", "لا فاضي، عندي أهداف 🎯", "فاضي لك ويا حبايبي 🌹", "شتبي؟ فاضي بس للكلام الهادف 💬",
     "فاضي وانت نجمي 🌟", "مو فاضي، دبرلي حالك 🤷‍♂️", "فاضي بس للطيبين 😇", "لا فاضي، عندي مشاريع 🏗️",
     "فاضي وياك يا غالي 💎", "شتبي؟ فاضي بس للمهمات 🎖️", "فاضي مثل سحابة 🌤️", "مو فاضي، عندي خطط 🗓️",
-    "فاضي لك ويا روحي 🫀", "لا فاضي، عندي أحلام 🌙", "فاضي وياك يا حبيبي ❤️", "شتبi؟ فاضي بس للعمل 💼",
+    "فاضي لك ويا روحي 🫀", "لا فاضي، عندي أحلام 🌙", "فاضي وياك يا حبيبي ❤️", "شتبي؟ فاضي بس للعمل 💼",
     "فاضي مثل نهر 🏞️", "مو فاضي، عندي طموحات 🚀", "فاضي لك ويا قمر 🌕", "لا فاضي، عندي أمنيات 🌠",
-    "فاضي وياك يا حياتي 🌸", "شتبي؟ فاضي بس للتحديات ⚔️", "فاضي مثل نجمة 🌟", "آه فاضي، شتريد مني؟ 🎯"
+    "فاضي وياك يا حياتي 🌸", "شتبي؟ فاضي بس للتحديات ⚔️", "فاضي مثل نجمة 🌟", "آه فاضي، شتريد مني？ 🎯"
 ]
 
 # لوحات المفاتيح المتطورة
@@ -570,53 +502,12 @@ def create_admin_advanced_keyboard():
     keyboard.add('🔙 رجوع للإدارة')
     return keyboard
 
-def create_channel_keyboard():
-    """إنشاء كيبورد للاشتراك في القناة"""
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("📺 اشترك في القناة", url=CHANNEL_URL))
-    keyboard.add(InlineKeyboardButton("✅ تحقق من الاشتراك", callback_data="check_subscription"))
-    return keyboard
-
-def create_subscription_check_keyboard():
-    """إنشاء كيبورد للتحقق من الاشتراك"""
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("📺 اشترك أولاً", url=CHANNEL_URL))
-    keyboard.add(InlineKeyboardButton("✅ تحقق من الاشتراك", callback_data="verify_subscription"))
-    return keyboard
-
-# نظام التحقق من الاشتراك
-def require_subscription(func):
-    """ديكورator للتحقق من الاشتراك قبل تنفيذ الأمر"""
-    def wrapper(message):
-        user_id = message.from_user.id
-        
-        # التحقق مما إذا كان المستخدم مشتركاً
-        if not check_user_subscription(user_id):
-            subscription_text = f"""
-📺 **اشتراك مطلوب!**
-
-🔔 **عذراً {message.from_user.first_name}**، يجب عليك الاشتراك في قناتنا أولاً لاستخدام هذا البوت.
-
-📌 **القناة الرسمية:** {REQUIRED_CHANNEL}
-
-✅ **بعد الاشتراك، اضغط على زر "تحقق من الاشتراك"**
-            """
-            bot.reply_to(message, subscription_text, reply_markup=create_subscription_check_keyboard())
-            return
-        
-        # إذا كان مشتركاً، تحديث حالته وتنفيذ الأمر
-        update_user_membership(user_id, True)
-        return func(message)
-    
-    return wrapper
-
 # الأوامر الأساسية
 @bot.message_handler(commands=['start'])
-@require_subscription
 def send_welcome(message):
     save_user_info(message.from_user)
     
-    welcome_text = f"""
+    welcome_text = """
 ﷽ 
 
 🎊 **أهلاً وسهلاً بك في بوت سيـو المتطور!**
@@ -628,11 +519,7 @@ def send_welcome(message):
 • 🎬 تحميل فيديوهات من جميع المنصات
 • 🎮 ألعاب مسلية وتفاعلية
 • ⚙️ إعدادات متقدمة قابلة للتخصيص
-• 📺 نظام القنوات الإلزامي
 • 🎊 ترحيب مخصص للمجموعات
-
-✅ **حالة اشتراكك:** 🟢 نشط
-📺 **القناة:** {REQUIRED_CHANNEL}
 
 💡 **استخدم الأزرار للتنقل السريع!**
     """
@@ -640,9 +527,8 @@ def send_welcome(message):
     bot.reply_to(message, welcome_text, reply_markup=create_main_keyboard())
 
 @bot.message_handler(commands=['help'])
-@require_subscription
 def help_command(message):
-    help_text = f"""
+    help_text = """
 📚 **جميع الأوامر المتاحة:**
 
 🛡 **أوامر الإدارة:**
@@ -680,64 +566,16 @@ def help_command(message):
 /video - تحميل فيديو مباشر
 /audio - تحميل صوت MP3
 
-📺 **أوامر القنوات:**
-/channel - معلومات القناة
-/subscribe - رابط الاشتراك
-
 ⚙️ **أوامر أخرى:**
 /settings - الإعدادات
 /broadcast - إذاعة
 /admin - لوحة الإدارة
 /menu - القائمة الرئيسية
-
-✅ **حالة اشتراكك:** 🟢 نشط
     """
     
     bot.reply_to(message, help_text)
 
-@bot.message_handler(commands=['channel'])
-def channel_info(message):
-    """معلومات القناة"""
-    channel_text = f"""
-📺 **معلومات القناة الرسمية**
-
-🏷 **اسم القناة:** {REQUIRED_CHANNEL}
-🔗 **الرابط:** {CHANNEL_URL}
-👥 **المشتركون:** +1000 عضو
-📅 **تاريخ الإنشاء:** قناة نشطة
-
-🎯 **محتويات القناة:**
-• آخر تحديثات البوت
-• شروحات واستخدامات
-• إعلانات وعروض حصرية
-• مسابقات وجوائز
-
-✅ **اشترك الآن لتتمتع بجميع ميزات البوت!**
-    """
-    
-    bot.reply_to(message, channel_text, reply_markup=create_channel_keyboard())
-
-@bot.message_handler(commands=['subscribe'])
-def subscribe_command(message):
-    """رابط الاشتراك في القناة"""
-    subscribe_text = f"""
-📺 **الاشتراك في القناة الرسمية**
-
-🔔 **لماذا يجب عليك الاشتراك؟**
-• الحصول على آخر التحديثات
-• استخدام جميع ميزات البوت
-• المشاركة في المسابقات
-• الدعم الفوري والمباشر
-
-📌 **رابط الاشتراك:** {CHANNEL_URL}
-
-✅ **بعد الاشتراك، استخدم /start لتفعيل حسابك**
-    """
-    
-    bot.reply_to(message, subscribe_text, reply_markup=create_channel_keyboard())
-
 @bot.message_handler(commands=['info'])
-@require_subscription
 def user_info(message):
     """معلومات العضو - محدثة"""
     try:
@@ -758,14 +596,14 @@ def user_info(message):
             warnings = user_data[5] or 0
             join_date = user_data[4] or 'غير معروف'
             coins = user_data[13] or 0
-            is_member = user_data[10] or 0
+            is_member = user_data[10] or 1
             last_activity = user_data[8] or 'غير معروف'
         else:
             messages_count = 0
             warnings = 0
             join_date = 'غير معروف'
             coins = 0
-            is_member = 0
+            is_member = 1
             last_activity = 'غير معروف'
         
         # التحقق من الصلاحيات
@@ -783,8 +621,6 @@ def user_info(message):
         else:
             role = "👤 عضو عادي"
         
-        membership_status = "🟢 مشترك" if is_member else "🔴 غير مشترك"
-        
         info_text = f"""
 📊 **معلومات العضو**
 
@@ -792,7 +628,6 @@ def user_info(message):
 📛 **اليوزر:** @{user.username or 'لا يوجد'}
 🆔 **الآيدي:** `{user.id}`
 🎯 **الرتبة:** {role}
-📺 **الحالة:** {membership_status}
 💰 **العملات:** {coins}
 ⚠️ **التحذيرات:** {warnings}
 💬 **الرسائل:** {messages_count}
@@ -807,56 +642,10 @@ def user_info(message):
     except Exception as e:
         bot.reply_to(message, f"❌ **حدث خطأ في جلب المعلومات:** {str(e)}")
 
-# نظام التحقق من الاشتراك عبر الكول باك
-@bot.callback_query_handler(func=lambda call: call.data in ['check_subscription', 'verify_subscription'])
-def check_subscription_callback(call):
-    """التحقق من اشتراك المستخدم في القناة"""
-    try:
-        user_id = call.from_user.id
-        
-        if check_user_subscription(user_id):
-            # تحديث حالة المستخدم
-            update_user_membership(user_id, True)
-            
-            success_text = f"""
-✅ **تم التحقق من الاشتراك بنجاح!**
-
-🎉 **مرحباً بك {call.from_user.first_name}** 
-🌟 **يمكنك الآن استخدام جميع ميزات البوت**
-
-💡 **استخدم /help لعرض جميع الأوامر المتاحة**
-            """
-            
-            bot.answer_callback_query(call.id, "✅ تم التحقق من الاشتراك!")
-            bot.edit_message_text(
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                text=success_text,
-                reply_markup=None
-            )
-            
-            # إرسال رسالة ترحيبية
-            bot.send_message(
-                call.message.chat.id,
-                "🎊 **تهانينا! تم تفعيل حسابك بنجاح**\n\nاستخدم الأزرار للبدء 🚀",
-                reply_markup=create_main_keyboard()
-            )
-            
-        else:
-            bot.answer_callback_query(
-                call.id, 
-                "❌ لم تشترك في القناة بعد! يرجى الاشتراك ثم المحاولة مرة أخرى.", 
-                show_alert=True
-            )
-            
-    except Exception as e:
-        logger.error(f"خطأ في التحقق من الاشتراك: {e}")
-        bot.answer_callback_query(call.id, "❌ حدث خطأ في التحقق")
-
-# نظام الترحيب التلقائي مع التحقق من الاشتراك
+# نظام الترحيب التلقائي
 @bot.message_handler(content_types=['new_chat_members'])
 def welcome_new_member(message):
-    """ترحيب تلقائي بالأعضاء الجدد مع التحقق من القنوات"""
+    """ترحيب تلقائي بالأعضاء الجدد"""
     try:
         chat_settings = get_group_settings(message.chat.id)
         
@@ -874,24 +663,8 @@ def welcome_new_member(message):
             # حفظ معلومات العضو الجديد
             save_user_info(new_member)
             
-            # التحقق من القنوات المطلوبة
-            if chat_settings['channel_required']:
-                # إرسال رسالة ترحيب مع طلب الاشتراك
-                welcome_text = f"""
-{welcome_msg}
-
-📺 **للاستمرار في استخدام المجموعة:**
-يجب الاشتراك في القناة الرسمية أولاً
-
-✅ **بعد الاشتراك، اضغط على زر التحقق**
-                """
-                
-                # إرسال الرسالة مع الأزرار
-                bot.reply_to(message, welcome_text, 
-                           reply_markup=create_subscription_check_keyboard())
-            else:
-                # إرسال رسالة ترحيب عادية
-                welcome_text = f"""
+            # إرسال رسالة ترحيب عادية
+            welcome_text = f"""
 {welcome_msg}
 
 📌 **نصائح للعضو الجديد:**
@@ -900,9 +673,9 @@ def welcome_new_member(message):
 • استخدم /help لعرض الأوامر
 
 {chat_settings['rules']}
-                """
-                
-                bot.reply_to(message, welcome_text)
+            """
+            
+            bot.reply_to(message, welcome_text)
             
             logger.info(f"تم ترحيب بعضو جديد: {new_member.first_name}")
     
@@ -911,7 +684,6 @@ def welcome_new_member(message):
 
 # نظام البحث المحسن
 @bot.message_handler(func=lambda message: message.text == '🔍 بحث')
-@require_subscription
 def handle_search(message):
     search_text = """
 🔍 **نظام البحث المتطور**
@@ -967,9 +739,8 @@ def process_search(message):
     except Exception as e:
         bot.reply_to(message, f"❌ **حدث خطأ في البحث:** {str(e)}")
 
-# نظام التحميل مع التحقق من الاشتراك
+# نظام التحميل
 @bot.message_handler(commands=['download', 'video', 'audio'])
-@require_subscription
 def handle_download_command(message):
     try:
         command = message.text.split()[0]
@@ -1046,7 +817,6 @@ def handle_download_command(message):
 
 # نظام الألعاب
 @bot.message_handler(commands=['game'])
-@require_subscription
 def games_menu(message):
     games_text = """
 🎮 **قائمة الألعاب المتاحة**
@@ -1076,7 +846,6 @@ def games_menu(message):
     bot.reply_to(message, games_text)
 
 @bot.message_handler(commands=['dice'])
-@require_subscription
 def dice_game(message):
     dice_value = random.randint(1, 6)
     dice_emoji = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅']
@@ -1109,7 +878,6 @@ def admin_panel(message):
 ┉ ≈ ┉ ≈ ┉ ≈ ┉ ≈ ┉
 🎯 **الميزات المتاحة:**
 • إدارة الأعضاء والمشرفين
-• نظام القنوات الإلزامي
 • إعدادات الترحيب
 • إحصائيات مفصلة
 • أوامر متقدمة
@@ -1177,7 +945,7 @@ def mention_all(message):
     except Exception as e:
         bot.reply_to(message, f"❌ **خطأ في التاك للكل:** {str(e)}")
 
-# معالجة جميع الرسائل مع التحقق من الاشتراك
+# معالجة جميع الرسائل
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
     # تخطي الرسائل من البوت نفسه
@@ -1194,24 +962,6 @@ def handle_all_messages(message):
     increment_message_count(message.from_user.id)
     
     text = message.text
-    
-    # التحقق من الاشتراك للرسائل العادية (باستثناء بعض الأوامر)
-    if text and not text.startswith('/') and not any(cmd in text for cmd in ['اشتراك', 'قناة', 'channel']):
-        if not check_user_subscription(message.from_user.id):
-            # إرسال رسالة طلب الاشتراك فقط مرة واحدة كل 10 رسائل
-            if random.randint(1, 10) == 1:
-                subscription_reminder = f"""
-📺 **اشتراك مطلوب!**
-
-عذراً {message.from_user.first_name}، يجب عليك الاشتراك في قناتنا لاستخدام البوت.
-
-✅ **القناة:** {REQUIRED_CHANNEL}
-🔗 **الرابط:** {CHANNEL_URL}
-
-بعد الاشتراك، اضغط على /start
-                """
-                bot.reply_to(message, subscription_reminder, reply_markup=create_subscription_check_keyboard())
-            return
     
     # ردود "سيو" - 44 رد مختلف
     if 'سيو' in text.lower() or 'شيو' in text.lower():
@@ -1262,11 +1012,8 @@ def handle_all_messages(message):
     elif text == '🎮 ألعاب':
         games_menu(message)
     
-    elif text == '📺 قنوات':
-        channel_info(message)
-    
     elif text == '🎁 عروض':
-        offers_text = f"""
+        offers_text = """
 🎁 **عروض حصرية**
 
 💰 **عروض العضوية:**
@@ -1279,13 +1026,7 @@ def handle_all_messages(message):
 • مكافآت النشاط
 • تحديات أسبوعية
 
-📺 **عروض القنوات:**
-• إشعارات حصرية
-• محتوى مميز
-• مسابقات دورية
-
-🔔 **تابع القناة للحصول على العروض!**
-{CHANNEL_URL}
+🌟 **استخدم البوت للاستفادة من العروض!**
         """
         bot.reply_to(message, offers_text)
     
@@ -1296,7 +1037,6 @@ def handle_all_messages(message):
 ⚙️ **إعدادات المجموعة**
 
 🎊 **الترحيب:** {'✅ مفعل' if settings['welcome_enabled'] else '❌ معطل'}
-📺 **القنوات المطلوبة:** {'✅ مفعل' if settings['channel_required'] else '❌ معطل'}
 👥 **عدد الأعضاء:** {bot.get_chat_members_count(message.chat.id) if hasattr(bot, 'get_chat_members_count') else 'غير معروف'}
 
 🔧 **للتعديل:** استخدم أوامر الإدارة
@@ -1307,7 +1047,6 @@ def handle_all_messages(message):
 ⚙️ **الإعدادات الشخصية**
 
 👤 **الاسم:** {message.from_user.first_name}
-📺 **حالة الاشتراك:** {'🟢 نشط' if check_user_subscription(message.from_user.id) else '🔴 غير نشط'}
 💬 **رسائلك:** {random.randint(10, 1000)}
 🌟 **مستواك:** {random.randint(1, 100)}
 
@@ -1321,40 +1060,9 @@ def handle_all_messages(message):
     elif text == '🔙 رجوع للإدارة':
         admin_panel(message)
 
-# وظيفة دورية للتحقق من الاشتراكات
-def check_subscriptions_periodically():
-    """فحص الاشتراكات دورياً"""
-    while True:
-        try:
-            conn = sqlite3.connect('bot_data.db')
-            c = conn.cursor()
-            
-            # جلب جميع المستخدمين
-            c.execute('SELECT user_id FROM users WHERE is_member = 1')
-            users = c.fetchall()
-            
-            for (user_id,) in users:
-                if not check_user_subscription(user_id):
-                    # تحديث حالة المستخدم إذا لم يعد مشتركاً
-                    update_user_membership(user_id, False)
-                    logger.info(f"تم تحديث حالة المستخدم {user_id} إلى غير مشترك")
-            
-            conn.close()
-            time.sleep(3600)  # التحقق كل ساعة
-            
-        except Exception as e:
-            logger.error(f"خطأ في الفحص الدوري: {e}")
-            time.sleep(300)
-
-# بدء الفحص الدوري في thread منفصل
-subscription_thread = threading.Thread(target=check_subscriptions_periodically, daemon=True)
-subscription_thread.start()
-
 # بدء التشغيل
 if __name__ == '__main__':
-    print("🤖 **بوت سيـو المتطور يعمل الآن!**")
-    print(f"📺 **القناة المطلوبة:** {REQUIRED_CHANNEL}")
-    print("✅ **تم تفعيل نظام الاشتراك الإلزامي**")
+    print("bot is restarted**")
     
     try:
         bot.polling(none_stop=True, interval=1, timeout=60)
